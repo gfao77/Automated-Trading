@@ -6,7 +6,9 @@ library(quantmod);
 library(TTR);
 library(randomForest);
 library(nnet);
-library(neuralnet);
+library(e1071);
+library(kernlab);
+
 
 #Functions: bulid output. We build an indicator that measures variations of the price in the time series which are greater that a given input threshold 
 #on a certain window period. This indicator is later used to capture buying/selling signals
@@ -64,6 +66,7 @@ mySAR <- function(x) SAR(x[, c(2,4)])[,1]
 myVolat <- function(x) volatility(OHLC(x), calc="garman")[,1]
 
 
+
 getSymbols("YHOO",src="google") # from google finance 
 data(YHOO)
 data.model <- specifyModel(ind(YHOO,10,0.025)~ Delt(Cl(YHOO), k=1:10)+myATR(YHOO)+mySMI(YHOO)+myADX(YHOO)+myAroon(YHOO)+myBB(YHOO)+myChaikinVol(YHOO)+myCLV(YHOO)+myEMV(YHOO)+myMACD(YHOO)+myMFI(YHOO)+mySAR(YHOO)+myVolat(YHOO)+RSI(Cl(YHOO))+runMean(Cl(YHOO))+runSD(Cl(YHOO))+CMO(Cl(YHOO))+EMA(Delt(Cl(YHOO))))
@@ -104,8 +107,8 @@ Tform <-formula(data.model)
 
 norm.data <- scale(Tdata.train)
 
-nn <- nnet(Tform, norm.data[1:1035,], size=10, decay=0.01, linout=T, trace=F)
-norm.pred <- predict(nn, norm.data[1036:1535,])
+nn.reg <- nnet(Tform, norm.data[1:1035,], size=10, decay=0.01, linout=T, trace=F)
+norm.pred <- predict(nn.reg, norm.data[1036:1535,])
 preds <- unscale(norm.pred, norm.data)
 
 
@@ -113,18 +116,122 @@ signls.pred <- trading.signal(preds)
 signls.true <- trading.signal(Tdata.train[1036:1535,1])
 
 conf <- table(signls.true, signls.pred)
-conf
+
+#Testing
+
+norm.data.test <- scale(Tdata.test)
+
+norm.pred.test <- predict(nn.reg, norm.data.test)
+preds.test <- unscale(norm.pred.test, norm.data.test)
+
+signls.pred.test <- trading.signal(preds.test)
+signls.true.test <- trading.signal(Tdata.test[,1])
+
+conf.test <- table(signls.true.test, signls.pred.test)
+
+
 
 #Neural network to predict the action to be taken
 
 signals <- trading.signal(Tdata.train[,1])
 
 norm.data.sign <- data.frame(signals=signals,scale(Tdata.train[,-1]))
-form.sign <- as.forumla()
 
-nn <- nnet(signals ~ ., norm.data.sign[1:1035,], size=10, decay=0.01, linout=T, trace=F)
-pred.sign <- predict(nn, norm.data.sign[1036:1535,], type="class")
+nn.cla <- nnet(signals ~ ., norm.data.sign[1:1035,], size=10, decay=0.01, linout=T, trace=F)
+pred.sign <- predict(nn.cla, norm.data.sign[1036:1535,], type="class")
 
 conf.sign <- table(signals[1036:1535], pred.sign)
+
+
+#Testing
+
+signals.test <- trading.signal(Tdata.test[,1])
+
+norm.data.sign.test <- data.frame(signals.test=signals.test,scale(Tdata.test[,-1]))
+
+pred.sign.test <- predict(nn.cla, norm.data.sign.test, type="class")
+conf.sign.test <- table(signals.test, pred.sign.test)
+
+
+
+
+
+#Prdiction with Supported Vector Machines
+
+#Prediction on the values of ind
+
+sv <- svm(Tform, Tdata.train[1:1035,], gamma=0.001, cost=100)
+svm.pred <- predict(sv, Tdata.train[1036:1535,])
+signls.pred.svm <- trading.signal(svm.pred)
+
+conf.sign.svm <- table(signals[1036:1535], signls.pred.svm)
+
+#Testing
+
+svm.pred.test <- predict(sv, Tdata.test)
+signls.pred.svm.test <- trading.signal(svm.pred.test)
+
+conf.sign.svm.test <- table(signals.test, signls.pred.svm.test)
+
+
+#Prediction as classification of trading signals
+
+data <- cbind(signals=signals, Tdata.train[,-1])
+ksv <- ksvm(signals ~ ., data[1:1035,], C=10)
+
+ks.pred <- predict(ksv, data[1036:1535,])
+
+conf.sign.ksvm <- table(signals[1036:1535],ks.pred)
+
+#Testing
+
+data.test <- cbind(signals.test=signals.test, Tdata.test[,-1])
+ks.pred.test <- predict(ksv, data.test)
+conf.sign.ksvm.test <- table(signals.test,ks.pred.test)
+
+
+#Print tests
+
+print("Method 1: Neural Network with regression")
+print("Training test")
+conf
+print("Test")
+conf.test
+
+print("Method 2: Neural Network with classification")
+print("Training test")
 conf.sign
+print("Test")
+conf.sign.test
+
+
+print("Method 3: Supported Vector Machine regression")
+print("Training test")
+conf.sign.svm
+print("Test")
+conf.sign.svm.test
+
+
+print("Method 4: KSVM for classification")
+print("Training test")
+conf.sign.ksvm
+print("Test")
+conf.sign.ksvm.test
+
+
+#Plotting
+
+candleChart(last(YHOO,"10 weeks"), theme="white")
+addAvg.price <- newTA(FUN=avg.price, col=1, legend = "AvgPrice")
+#addT.ind <- newTA(FUN=ind, col=1, legend = "T indicator")
+addAvg.price(on=1)
+#addT.ind()
+
+
+
+
+
+
+
+
 
